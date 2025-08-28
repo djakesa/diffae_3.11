@@ -1,5 +1,6 @@
 # Not the Official implementation of Diffusion Autoencoders
-### Main changes vs. original
+## Main changes vs. original
+### experiment.py
 
 - **Logging**
   - Replaced **TensorBoardLogger** → **CSVLogger**
@@ -223,4 +224,5 @@ This experiment can be run on 2080Ti's.
 # diffae
 python run_celeba64.py
 ```
+
 

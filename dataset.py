@@ -106,15 +106,32 @@ class BaseLMDB(Dataset):
     def __len__(self):
         return self.length
 
-    def __getitem__(self, index):
+    def __getitem__(self, index, tries=0, max_tries=10):
         with self.env.begin(write=False) as txn:
-            key = f'{self.original_resolution}-{str(index).zfill(self.zfill)}'.encode(
-                'utf-8')
+            key = f'{str(index + 1).zfill(6)}.jpg'.encode('utf-8')  #  correspond à la clé écrite
+            #key = f'{str(index + 1).zfill(6)}.png'.encode('utf-8')  #  correspond à la clé écrite
+
             img_bytes = txn.get(key)
 
-        buffer = BytesIO(img_bytes)
-        img = Image.open(buffer)
+            if img_bytes is None:
+                if tries >= max_tries:
+                    raise IndexError(f" Trop de tentatives : clé absente pour l'index {index} : {key}")
+                print(f" Clé absente à l'index {index} – tentative {tries + 1}/{max_tries}")
+                return self.__getitem__((index + 1) % self.__len__(), tries + 1, max_tries)
+
+            try:
+                buffer = BytesIO(img_bytes)
+                img = Image.open(buffer).convert("RGB")
+            except Exception as e:
+                if tries >= max_tries:
+                    raise IndexError(f" Image invalide à l'index {index} : {e}")
+                print(f" Image corrompue à l'index {index} – tentative {tries + 1}/{max_tries}")
+                return self.__getitem__((index + 1) % self.__len__(), tries + 1, max_tries)
+
         return img
+
+
+
 
 
 def make_transform(
@@ -384,6 +401,7 @@ class CelebAttrDataset(Dataset):
             for p in Path(f'{folder}').glob(f'**/*.{ext}')
         ]
         paths = [str(each).split('.')[0] + '.jpg' for each in paths]
+
 
         if d2c:
             transform = [

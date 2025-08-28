@@ -961,8 +961,8 @@ def train(conf: TrainConfig, accelerator='gpu', devices=[0], nodes=1, mode: str 
         #plugins.append(DDPPlugin(find_unused_parameters=False))
 
     trainer = pl.Trainer(
-        #max_epochs = conf.max_epochs,
-        max_steps=conf.total_samples // conf.batch_size_effective,
+        max_epochs = conf.max_epochs,
+        #max_steps=conf.total_samples // conf.batch_size_effective,
         resume_from_checkpoint=resume,
         devices=devices,
         num_nodes=nodes,

@@ -33,6 +33,13 @@
 
  More robust, works with different LMDB key formats
 
+ ### config.py
+put your own path eg. `MNIST.lmdb`  
+**TrainConfig.make_dataset**  
+`crop_d2c=False`  
+
+
+
 
 
 # Official implementation of Diffusion Autoencoders
@@ -234,6 +241,7 @@ This experiment can be run on 2080Ti's.
 # diffae
 python run_celeba64.py
 ```
+
 
 
 

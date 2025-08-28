@@ -25,7 +25,8 @@ data_paths = {
     os.path.expanduser('datasets/celeba'),
     # used for training DPM models
     'celebalmdb':
-    os.path.expanduser('datasets/celeba.lmdb'),
+    #os.path.expanduser('/projects/0/prjs1205/face_snellius.lmdb'),
+    os.path.expanduser('/projects/0/prjs1205/MNIST.lmdb'),
     'celebahq':
     os.path.expanduser('datasets/celebahq256.lmdb'),
     'horse256':
@@ -299,7 +300,8 @@ class TrainConfig(BaseConfig):
             return CelebAlmdb(path=path or self.data_path,
                               image_size=self.img_size,
                               original_resolution=None,
-                              crop_d2c=True,
+                              #crop_d2c=True,
+                              crop_d2c=False,
                               **kwargs)
         else:
             raise NotImplementedError()

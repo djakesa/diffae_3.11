@@ -23,6 +23,16 @@
   - Removed unused `flip` import
   - `on_train_batch_end` signature: `dataloader_idx=0` (default)
   - Fallback for sample saving → saves `.png` to `logs/samples/` if no TB
+ 
+### dataset.py  
+**BaseLMDB.__getitem__**
+
+- Changed key format: supports `000001.jpg` (and `.png`) instead of `{resolution}-{index}`  
+- Added retries if key missing or image corrupted  
+- Forces RGB conversion  
+
+ More robust, works with different LMDB key formats
+
 
 
 # Official implementation of Diffusion Autoencoders
@@ -224,5 +234,6 @@ This experiment can be run on 2080Ti's.
 # diffae
 python run_celeba64.py
 ```
+
 
 

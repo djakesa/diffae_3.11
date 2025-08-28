@@ -1,3 +1,29 @@
+# Not the Official implementation of Diffusion Autoencoders
+### Main changes vs. original
+
+- **Logging**
+  - Replaced **TensorBoardLogger** → **CSVLogger**
+  - Use `self.log(...)` (Lightning-native) instead of direct `add_scalar`
+  - Added fallbacks: metrics/images saved to disk if logger not available
+
+- **Trainer API**
+  - Switched to new API: `accelerator`, `devices`, `num_nodes`
+  - Removed manual `DDPPlugin`
+  - Use `max_epochs` instead of `max_steps`
+
+- **Checkpoints**
+  - Still use `last.ckpt`, but resume logic updated for new API
+
+- **Eval mode**
+  - Added `safe_log_metrics` → log only valid scalars
+  - Metrics also saved in `evals/<name>.txt`
+
+- **Misc**
+  - Removed unused `flip` import
+  - `on_train_batch_end` signature: `dataloader_idx=0` (default)
+  - Fallback for sample saving → saves `.png` to `logs/samples/` if no TB
+
+
 # Official implementation of Diffusion Autoencoders
 
 A CVPR 2022 (ORAL) paper ([paper](https://openaccess.thecvf.com/content/CVPR2022/html/Preechakul_Diffusion_Autoencoders_Toward_a_Meaningful_and_Decodable_Representation_CVPR_2022_paper.html), [site](https://diff-ae.github.io/), [5-min video](https://youtu.be/i3rjEsiHoUU)):
@@ -197,3 +223,4 @@ This experiment can be run on 2080Ti's.
 # diffae
 python run_celeba64.py
 ```
+

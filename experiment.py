@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-from numpy.lib.function_base import flip
+#from numpy.lib.function_base import flip
 from pytorch_lightning import loggers as pl_loggers
 from pytorch_lightning.callbacks import *
 from torch import nn
@@ -16,6 +16,12 @@ from torch.distributions import Categorical
 from torch.optim.optimizer import Optimizer
 from torch.utils.data.dataset import ConcatDataset, TensorDataset
 from torchvision.utils import make_grid, save_image
+
+from pytorch_lightning.loggers import CSVLogger
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from torch.utils.data import DataLoader, TensorDataset
+import math
+from pytorch_lightning import Trainer
 
 from config import *
 from dataset import *
@@ -397,18 +403,20 @@ class LitModel(pl.LightningModule):
                 if key in losses:
                     losses[key] = self.all_gather(losses[key]).mean()
 
-            if self.global_rank == 0:
-                self.logger.experiment.add_scalar('loss', losses['loss'],
-                                                  self.num_samples)
-                for key in ['vae', 'latent', 'mmd', 'chamfer', 'arg_cnt']:
-                    if key in losses:
-                        self.logger.experiment.add_scalar(
-                            f'loss/{key}', losses[key], self.num_samples)
+            for key in ['loss', 'vae', 'latent', 'mmd', 'chamfer', 'arg_cnt']:
+                if key in losses:
+                    self.log(f'loss/{key}' if key != 'loss' else 'loss',
+                             losses[key],
+                             on_step=True,
+                             on_epoch=True,
+                             prog_bar=(key == 'loss'),
+                             logger=True)
+
 
         return {'loss': loss}
 
     def on_train_batch_end(self, outputs, batch, batch_idx: int,
-                           dataloader_idx: int) -> None:
+                           dataloader_idx: int=0) -> None:
         """
         after each training step ...
         """
@@ -516,9 +524,16 @@ class LitModel(pl.LightningModule):
 
                     if self.global_rank == 0:
                         grid_real = (make_grid(real) + 1) / 2
-                        self.logger.experiment.add_image(
-                            f'sample{postfix}/real', grid_real,
-                            self.num_samples)
+                        #self.logger.experiment.add_image(
+                            #f'sample{postfix}/real', grid_real,
+                            #self.num_samples)
+
+                        if hasattr(self.logger, "experiment") and hasattr(self.logger.experiment, "add_image"):
+                            self.logger.experiment.add_image(f'sample{postfix}/real', grid_real, self.num_samples)
+                        else:
+                            os.makedirs("logs/samples", exist_ok=True)
+                            save_image(grid_real, f"logs/samples/real_{self.global_step}.png")
+
 
                 if self.global_rank == 0:
                     # save samples to the tensorboard
@@ -530,8 +545,15 @@ class LitModel(pl.LightningModule):
                     path = os.path.join(sample_dir,
                                         '%d.png' % self.num_samples)
                     save_image(grid, path)
-                    self.logger.experiment.add_image(f'sample{postfix}', grid,
-                                                     self.num_samples)
+                    #self.logger.experiment.add_image(f'sample{postfix}', grid,
+                                                     #self.num_samples)
+
+                    if hasattr(self.logger, "experiment") and hasattr(self.logger.experiment, "add_image"):
+                        self.logger.experiment.add_image(f'sample{postfix}', grid, self.num_samples)
+                    else:
+                        os.makedirs("logs/samples", exist_ok=True)
+                        save_image(grid, f"logs/samples/sample_{self.global_step}.png")
+
             model.train()
 
         if self.conf.sample_every_samples > 0 and is_time(
@@ -587,8 +609,13 @@ class LitModel(pl.LightningModule):
                                  conds_mean=self.conds_mean,
                                  conds_std=self.conds_std)
             if self.global_rank == 0:
-                self.logger.experiment.add_scalar(f'FID{postfix}', score,
-                                                  self.num_samples)
+                #self.logger.experiment.add_scalar(f'FID{postfix}', score,
+                                                  #self.num_samples)
+                if hasattr(self.logger, "experiment") and hasattr(self.logger.experiment, "add_scalar"):
+                    self.logger.experiment.add_scalar(f'FID{postfix}', score, self.num_samples)
+                else:
+                    self.log(f'FID{postfix}', score, on_step=False, on_epoch=True)
+
                 if not os.path.exists(self.conf.logdir):
                     os.makedirs(self.conf.logdir)
                 with open(os.path.join(self.conf.logdir, 'eval.txt'),
@@ -612,8 +639,14 @@ class LitModel(pl.LightningModule):
 
                 if self.global_rank == 0:
                     for key, val in score.items():
-                        self.logger.experiment.add_scalar(
-                            f'{key}{postfix}', val, self.num_samples)
+
+                        if hasattr(self.logger, "experiment") and hasattr(self.logger.experiment, "add_scalar"):
+                            self.logger.experiment.add_scalar(f'{key}{postfix}', val, self.num_samples)
+                        else:
+                            self.log(f'{key}{postfix}', val, on_step=False, on_epoch=True)
+
+                        #self.logger.experiment.add_scalar(
+                            #f'{key}{postfix}', val, self.num_samples)
 
         if self.conf.eval_every_samples > 0 and self.num_samples > 0 and is_time(
                 self.num_samples, self.conf.eval_every_samples,
@@ -874,7 +907,17 @@ def is_time(num_samples, every, step_size):
     return num_samples - closest < step_size
 
 
-def train(conf: TrainConfig, gpus, nodes=1, mode: str = 'train'):
+def train(conf: TrainConfig, accelerator='gpu', devices=[0], nodes=1, mode: str = 'train'):
+    def safe_log_metrics(logger, metrics: dict, step: int):
+        """Log uniquement les métriques scalaires valides."""
+        for k, v in metrics.items():
+            try:
+                val = float(v)
+                if not math.isnan(val) and math.isfinite(val) and val >= 0:
+                    logger.experiment.log_metrics({k: val}, step=step)
+            except Exception as e:
+                print(f" Erreur lors du log de {k}: {e}")
+
     print('conf:', conf.name)
     # assert not (conf.fp16 and conf.grad_clip > 0
     #             ), 'pytorch lightning has bug with amp + gradient clipping'
@@ -899,26 +942,29 @@ def train(conf: TrainConfig, gpus, nodes=1, mode: str = 'train'):
         else:
             resume = None
 
-    tb_logger = pl_loggers.TensorBoardLogger(save_dir=conf.logdir,
-                                             name=None,
-                                             version='')
+    # CSVLogger à la place de TensorBoardLogger
+    logger = CSVLogger(
+        save_dir=conf.logdir,
+        name="csv_logs",
+    )
 
     # from pytorch_lightning.
 
-    plugins = []
-    if len(gpus) == 1 and nodes == 1:
-        accelerator = None
-    else:
-        accelerator = 'ddp'
-        from pytorch_lightning.plugins import DDPPlugin
+    #plugins = []
+    #if len(devices) == 1 and nodes == 1:
+        #accelerator = None
+    #else:
+        #accelerator = 'ddp'
+        #from pytorch_lightning.plugins import DDPPlugin
 
         # important for working with gradient checkpoint
-        plugins.append(DDPPlugin(find_unused_parameters=False))
+        #plugins.append(DDPPlugin(find_unused_parameters=False))
 
     trainer = pl.Trainer(
+        #max_epochs = conf.max_epochs,
         max_steps=conf.total_samples // conf.batch_size_effective,
         resume_from_checkpoint=resume,
-        gpus=gpus,
+        devices=devices,
         num_nodes=nodes,
         accelerator=accelerator,
         precision=16 if conf.fp16 else 32,
@@ -929,9 +975,12 @@ def train(conf: TrainConfig, gpus, nodes=1, mode: str = 'train'):
         # clip in the model instead
         # gradient_clip_val=conf.grad_clip,
         replace_sampler_ddp=True,
-        logger=tb_logger,
+        logger=logger,
         accumulate_grad_batches=conf.accum_batches,
-        plugins=plugins,
+        #plugins=plugins,
+        default_root_dir=conf.logdir,
+        enable_checkpointing=True,
+        reload_dataloaders_every_n_epochs=0,
     )
 
     if mode == 'train':
@@ -955,21 +1004,12 @@ def train(conf: TrainConfig, gpus, nodes=1, mode: str = 'train'):
         print(out)
 
         if get_rank() == 0:
-            # save to tensorboard
-            for k, v in out.items():
-                tb_logger.experiment.add_scalar(
-                    k, v, state['global_step'] * conf.batch_size_effective)
+            step = state.get('global_step', 0) * conf.batch_size_effective
+            safe_log_metrics(logger, out, step)
 
-            # # save to file
-            # # make it a dict of list
-            # for k, v in out.items():
-            #     out[k] = [v]
             tgt = f'evals/{conf.name}.txt'
-            dirname = os.path.dirname(tgt)
-            if not os.path.exists(dirname):
-                os.makedirs(dirname)
+            os.makedirs(os.path.dirname(tgt), exist_ok=True)
             with open(tgt, 'a') as f:
                 f.write(json.dumps(out) + "\n")
-            # pd.DataFrame(out).to_csv(tgt)
     else:
         raise NotImplementedError()
